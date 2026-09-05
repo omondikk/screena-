@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>CrossSync Viewer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5; 
+            padding: 12px;
+            padding-bottom: 80px;
+        }
+        .container { max-width: 500px; margin: 0 auto; }
+        .header {
+            background: linear-gradient(135deg, #4a90d9, #357abd);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .header h1 { font-size: 24px; }
+        .header p { opacity: 0.9; font-size: 14px; margin-top: 4px; }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card h3 { margin-bottom: 12px; color: #333; font-size: 16px; }
+        input {
+            width: 100%;
+            padding: 14px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+        }
+        input:focus { outline: none; border-color: #4a90d9; }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #4a90d9;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:active { transform: scale(0.98); }
+        .btn-secondary {
+            background: #6c757d;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .item {
+            background: #f8f9fa;
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4a90d9;
+            word-break: break-word;
+        }
+        .item .text { font-size: 15px; line-height: 1.5; }
+        .item .meta {
+            color: #666;
+            font-size: 11px;
+            margin-top: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .status {
+            text-align: center;
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .status.online { background: #d4edda; color: #155724; }
+        .status.offline { background: #f8d7da; color: #721c24; }
+        .status.loading { background: #e2e3e5; color: #383d41; }
+        .hidden { display: none !important; }
+        .empty { text-align: center; color: #999; padding: 30px 0; }
+        .count { text-align: center; color: #666; font-size: 14px; margin-bottom: 12px; }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .badge {
+            background: #28a745;
+            color: white;
+            border-radius: 50%;
+            padding: 2px 10px;
+            font-size: 12px;
+        }
+        .decrypted-badge {
+            background: #17a2b8;
+            color: white;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 10px;
+            display: inline-block;
+            margin-top: 4px;
+        }
+        .timestamp { font-size: 11px; color: #999; }
+        .device-id { font-size: 11px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔄 CrossSync</h1>
+            <p>Clipboard Viewer • Encrypted & Decrypted</p>
+        </div>
+
+        <!-- Login -->
+        <div id="loginCard" class="card">
+            <h3>🔐 Login</h3>
+            <input type="email" id="email" placeholder="Email" value="test@crosssync.com">
+            <input type="password" id="password" placeholder="Password" value="TestPass123!">
+            <button onclick="login()">Login</button>
+            <div id="loginStatus" style="margin-top: 10px; text-align: center; font-size: 14px;"></div>
+        </div>
+
+        <!-- Data -->
+        <div id="dataCard" class="card hidden">
+            <div class="toolbar">
+                <h3>📋 Items</h3>
+                <div>
+                    <button class="btn-secondary" onclick="refresh()" style="margin-right: 8px;">🔄</button>
+                    <span id="itemCount" class="badge">0</span>
+                </div>
+            </div>
+            <div id="status" class="status loading">Loading...</div>
+            <div id="itemsList"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://crosssync-backend.onrender.com';
+        
+        // Get token from localStorage
+        let token = localStorage.getItem('token');
+
+        // Login function
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const statusEl = document.getElementById('loginStatus');
+
+            statusEl.textContent = 'Logging in...';
+
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    token = data.access_token;
+                    localStorage.setItem('token', token);
+                    statusEl.innerHTML = '✅ Login successful!';
+                    document.getElementById('loginCard').classList.add('hidden');
+                    document.getElementById('dataCard').classList.remove('hidden');
+                    await refresh();
+                } else {
+                    const error = await response.json();
+                    statusEl.innerHTML = `❌ ${error.detail || 'Login failed'}`;
+                }
+            } catch (error) {
+                statusEl.innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        // Decrypt function using the desktop app's key
+        async function decryptContent(encrypted) {
+            if (!encrypted) return '';
+            if (!encrypted.startsWith('Z0FBQU')) return encrypted; // Not encrypted
+            
+            try {
+                // Decrypt using the server's decrypt endpoint
+                const response = await fetch(`${API_URL}/decrypt`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ encrypted: encrypted })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return data.decrypted || encrypted;
+                }
+                return encrypted; // Fallback
+            } catch(e) {
+                return encrypted;
+            }
+        }
+
+        // Refresh items
+        async function refresh() {
+            if (!token) {
+                document.getElementById('loginCard').classList.remove('hidden');
+                document.getElementById('dataCard').classList.add('hidden');
+                return;
+            }
+
+            const statusEl = document.getElementById('status');
+            const itemsList = document.getElementById('itemsList');
+            const itemCount = document.getElementById('itemCount');
+
+            statusEl.className = 'status loading';
+            statusEl.textContent = 'Fetching...';
+
+            try {
+                const deviceId = localStorage.getItem('device_id') || 'phone-viewer';
+                const response = await fetch(`${API_URL}/clipboard/sync/${deviceId}?access_token=${token}`);
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        token = null;
+                        localStorage.removeItem('token');
+                        document.getElementById('loginCard').classList.remove('hidden');
+                        document.getElementById('dataCard').classList.add('hidden');
+                        return;
+                    }
+                    throw new Error(await response.text());
+                }
+
+                const data = await response.json();
+                const items = data.items || [];
+                
+                itemCount.textContent = items.length;
+                
+                if (items.length === 0) {
+                    statusEl.className = 'status online';
+                    statusEl.textContent = '✅ No items yet';
+                    itemsList.innerHTML = '<div class="empty">No clipboard items synced yet</div>';
+                    return;
+                }
+
+                statusEl.className = 'status online';
+                statusEl.textContent = `✅ ${items.length} items`;
+
+                // Decrypt and display items
+                let html = '';
+                for (let item of items) {
+                    let content = item.content || 'Empty';
+                    let isEncrypted = content.startsWith('Z0FBQU');
+                    let decrypted = '';
+                    
+                    if (isEncrypted) {
+                        decrypted = await decryptContent(content);
+                    }
+                    
+                    html += `
+                        <div class="item">
+                            <div class="text">${isEncrypted ? '🔓 ' : '📝 '}${isEncrypted ? decrypted || 'Decrypting...' : content}</div>
+                            ${isEncrypted && decrypted && decrypted !== content ? '<span class="decrypted-badge">✓ Decrypted</span>' : ''}
+                            <div class="meta">
+                                <span class="device-id">📱 ${item.device_id ? item.device_id.substring(0, 8) + '...' : 'Unknown'}</span>
+                                <span class="timestamp">🕐 ${item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown'}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                itemsList.innerHTML = html;
+
+            } catch (error) {
+                statusEl.className = 'status offline';
+                statusEl.textContent = `❌ Error: ${error.message}`;
+                itemsList.innerHTML = '<div class="empty">Error loading items</div>';
+            }
+        }
+
+        // Auto-login if token exists
+        if (token) {
+            document.getElementById('loginCard').classList.add('hidden');
+            document.getElementById('dataCard').classList.remove('hidden');
+            refresh();
+        }
+
+        // Auto-refresh every 10 seconds
+        setInterval(() => {
+            if (token) refresh();
+        }, 10000);
+    </script>
+</body>
+</html>
