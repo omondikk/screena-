@@ -6,12 +6,9 @@ import uuid
 import hashlib
 import json
 from datetime import datetime
-from cryptography.fernet import Fernet
-import base64
 import os
-import secrets
 
-# Configuration - Update this to your production URL
+# Configuration
 BASE_URL = "https://crosssync-backend.onrender.com"
 
 class CrossSyncDesktop:
@@ -21,8 +18,6 @@ class CrossSyncDesktop:
         self.last_content = ""
         self.synced_hashes = set()
         self.is_running = False
-        self.encryption_key = self.get_or_create_key()
-        self.cipher = Fernet(self.encryption_key)
         self.config_file = os.path.join(os.path.expanduser("~"), ".crosssync_config.json")
         self.load_config()
         
@@ -64,51 +59,6 @@ class CrossSyncDesktop:
         except:
             pass
         return device_id
-    
-    def get_or_create_key(self):
-        """Get or create a valid Fernet encryption key"""
-        key_file = os.path.join(os.path.expanduser("~"), ".crosssync_key.json")
-        
-        try:
-            if os.path.exists(key_file):
-                with open(key_file, 'r') as f:
-                    data = json.load(f)
-                    key = data.get("key", "")
-                    if key and len(key) == 44:
-                        return key.encode()
-        except:
-            pass
-        
-        # Generate a new Fernet key
-        key = Fernet.generate_key()
-        
-        try:
-            with open(key_file, 'w') as f:
-                json.dump({"key": key.decode()}, f)
-        except:
-            pass
-        
-        return key
-    
-    def encrypt(self, text):
-        if not text:
-            return ""
-        try:
-            encrypted = self.cipher.encrypt(text.encode())
-            return base64.urlsafe_b64encode(encrypted).decode()
-        except Exception as e:
-            print(f"⚠️ Encryption error: {e}")
-            return text
-    
-    def decrypt(self, encrypted_text):
-        if not encrypted_text:
-            return ""
-        try:
-            encrypted = base64.urlsafe_b64decode(encrypted_text.encode())
-            decrypted = self.cipher.decrypt(encrypted)
-            return decrypted.decode()
-        except Exception as e:
-            return encrypted_text
     
     def hash_content(self, text):
         return hashlib.sha256(text.encode()).hexdigest()
@@ -182,15 +132,15 @@ class CrossSyncDesktop:
             print(f"⚠️ Error registering device: {e}")
     
     def sync_clipboard(self, content):
+        """Sync plain text - NO encryption"""
         try:
-            encrypted = self.encrypt(content)
             content_hash = self.hash_content(content)
             
             if content_hash in self.synced_hashes:
                 return
             
             sync_data = {
-                "content": encrypted,
+                "content": content,  # Plain text!
                 "device_id": self.device_id,
                 "content_hash": content_hash
             }
@@ -215,6 +165,7 @@ class CrossSyncDesktop:
             return False
     
     def fetch_pending(self):
+        """Fetch plain text - NO decryption needed"""
         try:
             response = httpx.get(
                 f"{BASE_URL}/clipboard/sync/{self.device_id}",
@@ -232,15 +183,13 @@ class CrossSyncDesktop:
                     if content_hash in self.synced_hashes:
                         continue
                     
-                    encrypted_content = item.get("content")
-                    decrypted = self.decrypt(encrypted_content)
-                    
-                    if decrypted:
-                        pyperclip.copy(decrypted)
+                    content = item.get("content", "")
+                    if content:
+                        pyperclip.copy(content)
                         self.synced_hashes.add(content_hash)
                         self.save_config()
                         received_count += 1
-                        print(f"📥 Received: {decrypted[:30]}...")
+                        print(f"📥 Received: {content[:30]}...")
                 
                 if received_count > 0:
                     print(f"📥 Received {received_count} new items!")
@@ -279,8 +228,8 @@ class CrossSyncDesktop:
     
     def run(self):
         print("=" * 50)
-        print("🔄 CrossSync Clipboard Desktop App")
-        print("   Production Version 1.0.0")
+        print("🔄 CrossSync Clipboard Desktop App (No Encryption)")
+        print("   Production Version 2.0.0")
         print("=" * 50)
         
         if not self.login():

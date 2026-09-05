@@ -52,16 +52,14 @@
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
         }
-        button:active { background: #357abd; transform: scale(0.98); }
+        button:active { transform: scale(0.98); }
         .btn-secondary {
             background: #6c757d;
             width: auto;
             padding: 8px 16px;
             font-size: 14px;
         }
-        .btn-secondary:active { background: #5a6268; }
         .item {
             background: #f8f9fa;
             padding: 14px;
@@ -69,11 +67,6 @@
             margin-bottom: 10px;
             border-left: 4px solid #4a90d9;
             word-break: break-word;
-            animation: fadeIn 0.3s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
         }
         .item .text { 
             font-size: 15px; 
@@ -87,8 +80,6 @@
             margin-top: 8px;
             display: flex;
             justify-content: space-between;
-            border-top: 1px solid #eee;
-            padding-top: 6px;
         }
         .status {
             text-align: center;
@@ -123,17 +114,6 @@
             font-size: 12px;
             margin-top: 8px;
         }
-        .decrypted-badge {
-            background: #17a2b8;
-            color: white;
-            border-radius: 4px;
-            padding: 2px 8px;
-            font-size: 10px;
-            display: inline-block;
-            margin-top: 4px;
-        }
-        .plain-text { color: #28a745; font-size: 11px; margin-top: 2px; }
-        .encrypted-text { color: #dc3545; font-size: 11px; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -141,7 +121,7 @@
         <div class="header">
             <h1>🔄 CrossSync</h1>
             <p>View your clipboard from anywhere</p>
-            <p class="sub">⚡ Instant decrypted text</p>
+            <p class="sub">⚡ Plain text - No encryption</p>
         </div>
 
         <div id="loginCard" class="card">
@@ -224,29 +204,6 @@
             }
         }
 
-        async function decryptContent(encrypted) {
-            if (!encrypted) return '';
-            if (!encrypted.startsWith('Z0FBQU')) return encrypted;
-            
-            try {
-                const response = await fetch(`${API_URL}/decrypt`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ encrypted: encrypted })
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.decrypted && data.decrypted !== encrypted) {
-                        return data.decrypted;
-                    }
-                }
-                return encrypted;
-            } catch(e) {
-                return encrypted;
-            }
-        }
-
         async function refresh() {
             if (!token) {
                 document.getElementById('loginCard').classList.remove('hidden');
@@ -294,45 +251,18 @@
                 statusEl.className = 'status online';
                 statusEl.textContent = `✅ ${items.length} items (${total} total)`;
 
-                // Display items
                 let html = '';
-                let plainCount = 0;
-                
                 for (let item of items) {
-                    let displayText = '';
-                    let isPlain = false;
-                    
-                    // Check if content_plain exists and is different from encrypted
-                    if (item.content_plain && item.content_plain !== item.content) {
-                        // We have decrypted text!
-                        displayText = item.content_plain;
-                        isPlain = true;
-                        plainCount++;
-                    } else if (item.content && !item.content.startsWith('Z0FBQU')) {
-                        // Not encrypted
-                        displayText = item.content;
-                        isPlain = true;
-                        plainCount++;
-                    } else {
-                        // Still encrypted - try to decrypt
-                        displayText = await decryptContent(item.content);
-                        if (displayText === item.content) {
-                            displayText = '[Encrypted - unable to decrypt]';
-                        } else {
-                            isPlain = true;
-                            plainCount++;
-                        }
-                    }
+                    let content = item.content || 'Empty';
                     
                     // Truncate for display
-                    if (displayText.length > 500) {
-                        displayText = displayText.substring(0, 500) + '...';
+                    if (content.length > 500) {
+                        content = content.substring(0, 500) + '...';
                     }
                     
                     html += `
                         <div class="item">
-                            <div class="text">${isPlain ? '📝' : '🔒'} ${escapeHtml(displayText)}</div>
-                            ${isPlain ? '<div class="plain-text">✅ Decrypted</div>' : '<div class="encrypted-text">⚠️ Encrypted</div>'}
+                            <div class="text">📝 ${escapeHtml(content)}</div>
                             <div class="meta">
                                 <span class="device-id">📱 ${item.device_id ? item.device_id.substring(0, 8) + '...' : 'Unknown'}</span>
                                 <span class="timestamp">🕐 ${item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown'}</span>
@@ -340,11 +270,6 @@
                         </div>
                     `;
                 }
-                
-                if (plainCount > 0) {
-                    statusEl.textContent = `✅ ${items.length} items (${plainCount} decrypted)`;
-                }
-                
                 itemsList.innerHTML = html;
 
             } catch (error) {
