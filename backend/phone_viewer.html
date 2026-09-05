@@ -112,17 +112,21 @@
         }
         .timestamp { font-size: 11px; color: #999; }
         .device-id { font-size: 11px; color: #666; }
+        .refresh-note {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <div class="header">
             <h1>🔄 CrossSync</h1>
             <p>Clipboard Viewer • Encrypted & Decrypted</p>
         </div>
 
-        <!-- Login -->
         <div id="loginCard" class="card">
             <h3>🔐 Login</h3>
             <input type="email" id="email" placeholder="Email" value="test@crosssync.com">
@@ -131,7 +135,6 @@
             <div id="loginStatus" style="margin-top: 10px; text-align: center; font-size: 14px;"></div>
         </div>
 
-        <!-- Data -->
         <div id="dataCard" class="card hidden">
             <div class="toolbar">
                 <h3>📋 Items</h3>
@@ -142,16 +145,33 @@
             </div>
             <div id="status" class="status loading">Loading...</div>
             <div id="itemsList"></div>
+            <div class="refresh-note">Auto-refreshes every 10 seconds</div>
         </div>
     </div>
 
     <script>
         const API_URL = 'https://crosssync-backend.onrender.com';
-        
-        // Get token from localStorage
         let token = localStorage.getItem('token');
 
-        // Login function
+        // Generate a valid UUID v4
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0,
+                    v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Get or create device ID
+        function getDeviceId() {
+            let deviceId = localStorage.getItem('device_id');
+            if (!deviceId) {
+                deviceId = generateUUID();
+                localStorage.setItem('device_id', deviceId);
+            }
+            return deviceId;
+        }
+
         async function login() {
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
@@ -183,13 +203,11 @@
             }
         }
 
-        // Decrypt function using the desktop app's key
         async function decryptContent(encrypted) {
             if (!encrypted) return '';
-            if (!encrypted.startsWith('Z0FBQU')) return encrypted; // Not encrypted
+            if (!encrypted.startsWith('Z0FBQU')) return encrypted;
             
             try {
-                // Decrypt using the server's decrypt endpoint
                 const response = await fetch(`${API_URL}/decrypt`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -200,13 +218,12 @@
                     const data = await response.json();
                     return data.decrypted || encrypted;
                 }
-                return encrypted; // Fallback
+                return encrypted;
             } catch(e) {
                 return encrypted;
             }
         }
 
-        // Refresh items
         async function refresh() {
             if (!token) {
                 document.getElementById('loginCard').classList.remove('hidden');
@@ -222,7 +239,7 @@
             statusEl.textContent = 'Fetching...';
 
             try {
-                const deviceId = localStorage.getItem('device_id') || 'phone-viewer';
+                const deviceId = getDeviceId();
                 const response = await fetch(`${API_URL}/clipboard/sync/${deviceId}?access_token=${token}`);
                 
                 if (!response.ok) {
@@ -251,7 +268,6 @@
                 statusEl.className = 'status online';
                 statusEl.textContent = `✅ ${items.length} items`;
 
-                // Decrypt and display items
                 let html = '';
                 for (let item of items) {
                     let content = item.content || 'Empty';
@@ -262,9 +278,11 @@
                         decrypted = await decryptContent(content);
                     }
                     
+                    const displayText = isEncrypted ? (decrypted || 'Decrypting...') : content;
+                    
                     html += `
                         <div class="item">
-                            <div class="text">${isEncrypted ? '🔓 ' : '📝 '}${isEncrypted ? decrypted || 'Decrypting...' : content}</div>
+                            <div class="text">${isEncrypted ? '🔓 ' : '📝 '}${displayText}</div>
                             ${isEncrypted && decrypted && decrypted !== content ? '<span class="decrypted-badge">✓ Decrypted</span>' : ''}
                             <div class="meta">
                                 <span class="device-id">📱 ${item.device_id ? item.device_id.substring(0, 8) + '...' : 'Unknown'}</span>
