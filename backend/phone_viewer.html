@@ -123,19 +123,17 @@
             font-size: 12px;
             margin-top: 8px;
         }
-        .loading-spinner {
+        .decrypted-badge {
+            background: #17a2b8;
+            color: white;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 10px;
             display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #4a90d9;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
+            margin-top: 4px;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        .plain-text { color: #28a745; font-size: 11px; margin-top: 2px; }
+        .encrypted-text { color: #dc3545; font-size: 11px; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -213,7 +211,6 @@
                     document.getElementById('dataCard').classList.remove('hidden');
                     await refresh();
                     
-                    // Start auto-refresh
                     if (refreshTimer) clearInterval(refreshTimer);
                     refreshTimer = setInterval(() => {
                         if (token) refresh();
@@ -224,6 +221,29 @@
                 }
             } catch (error) {
                 statusEl.innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        async function decryptContent(encrypted) {
+            if (!encrypted) return '';
+            if (!encrypted.startsWith('Z0FBQU')) return encrypted;
+            
+            try {
+                const response = await fetch(`${API_URL}/decrypt`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ encrypted: encrypted })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.decrypted && data.decrypted !== encrypted) {
+                        return data.decrypted;
+                    }
+                }
+                return encrypted;
+            } catch(e) {
+                return encrypted;
             }
         }
 
@@ -274,20 +294,45 @@
                 statusEl.className = 'status online';
                 statusEl.textContent = `✅ ${items.length} items (${total} total)`;
 
-                // Display items instantly - NO DECRYPTION needed!
+                // Display items
                 let html = '';
+                let plainCount = 0;
+                
                 for (let item of items) {
-                    // Use plain text if available, fallback to content
-                    let displayText = item.content_plain || item.content || 'Empty';
+                    let displayText = '';
+                    let isPlain = false;
                     
-                    // Truncate if too long (for display)
+                    // Check if content_plain exists and is different from encrypted
+                    if (item.content_plain && item.content_plain !== item.content) {
+                        // We have decrypted text!
+                        displayText = item.content_plain;
+                        isPlain = true;
+                        plainCount++;
+                    } else if (item.content && !item.content.startsWith('Z0FBQU')) {
+                        // Not encrypted
+                        displayText = item.content;
+                        isPlain = true;
+                        plainCount++;
+                    } else {
+                        // Still encrypted - try to decrypt
+                        displayText = await decryptContent(item.content);
+                        if (displayText === item.content) {
+                            displayText = '[Encrypted - unable to decrypt]';
+                        } else {
+                            isPlain = true;
+                            plainCount++;
+                        }
+                    }
+                    
+                    // Truncate for display
                     if (displayText.length > 500) {
                         displayText = displayText.substring(0, 500) + '...';
                     }
                     
                     html += `
                         <div class="item">
-                            <div class="text">📝 ${escapeHtml(displayText)}</div>
+                            <div class="text">${isPlain ? '📝' : '🔒'} ${escapeHtml(displayText)}</div>
+                            ${isPlain ? '<div class="plain-text">✅ Decrypted</div>' : '<div class="encrypted-text">⚠️ Encrypted</div>'}
                             <div class="meta">
                                 <span class="device-id">📱 ${item.device_id ? item.device_id.substring(0, 8) + '...' : 'Unknown'}</span>
                                 <span class="timestamp">🕐 ${item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown'}</span>
@@ -295,6 +340,11 @@
                         </div>
                     `;
                 }
+                
+                if (plainCount > 0) {
+                    statusEl.textContent = `✅ ${items.length} items (${plainCount} decrypted)`;
+                }
+                
                 itemsList.innerHTML = html;
 
             } catch (error) {
@@ -315,7 +365,6 @@
             document.getElementById('loginCard').classList.add('hidden');
             document.getElementById('dataCard').classList.remove('hidden');
             refresh();
-            // Start auto-refresh
             refreshTimer = setInterval(() => {
                 if (token) refresh();
             }, 5000);

@@ -11,7 +11,7 @@ import base64
 import os
 import secrets
 
-# Configuration
+# Configuration - Update this to your production URL
 BASE_URL = "https://crosssync-backend.onrender.com"
 
 class CrossSyncDesktop:
