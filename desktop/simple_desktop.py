@@ -9,39 +9,88 @@ from datetime import datetime
 from cryptography.fernet import Fernet
 import base64
 import os
-import threading
+import secrets
 
 # Configuration
-BASE_URL = "http://127.0.0.1:8000"
-EMAIL = "test@crosssync.com"
-PASSWORD = "TestPass123!"
+BASE_URL = "https://crosssync-backend.onrender.com"
 
 class CrossSyncDesktop:
     def __init__(self):
-        self.device_id = str(uuid.uuid4())
+        self.device_id = self.get_or_create_device_id()
         self.access_token = None
         self.last_content = ""
         self.synced_hashes = set()
         self.is_running = False
         self.encryption_key = self.get_or_create_key()
         self.cipher = Fernet(self.encryption_key)
+        self.config_file = os.path.join(os.path.expanduser("~"), ".crosssync_config.json")
+        self.load_config()
         
+    def load_config(self):
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                    self.device_id = config.get("device_id", self.device_id)
+                    self.synced_hashes = set(config.get("synced_hashes", []))
+        except:
+            pass
+    
+    def save_config(self):
+        try:
+            config = {
+                "device_id": self.device_id,
+                "synced_hashes": list(self.synced_hashes)
+            }
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f)
+        except:
+            pass
+    
+    def get_or_create_device_id(self):
+        config_file = os.path.join(os.path.expanduser("~"), ".crosssync_device.json")
+        try:
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get("device_id")
+        except:
+            pass
+        
+        device_id = str(uuid.uuid4())
+        try:
+            with open(config_file, 'w') as f:
+                json.dump({"device_id": device_id}, f)
+        except:
+            pass
+        return device_id
+    
     def get_or_create_key(self):
         """Get or create a valid Fernet encryption key"""
-        # Create a proper 32-byte key
-        # Method 1: Use a fixed string padded to 32 bytes
-        raw_key = b"crosssync-clipboard-key-2024"  # 30 bytes
-        # Pad to 32 bytes
-        while len(raw_key) < 32:
-            raw_key += b"!"
-        raw_key = raw_key[:32]  # Ensure exactly 32 bytes
+        key_file = os.path.join(os.path.expanduser("~"), ".crosssync_key.json")
         
-        # Base64 encode for Fernet
-        key = base64.urlsafe_b64encode(raw_key)
+        try:
+            if os.path.exists(key_file):
+                with open(key_file, 'r') as f:
+                    data = json.load(f)
+                    key = data.get("key", "")
+                    if key and len(key) == 44:
+                        return key.encode()
+        except:
+            pass
+        
+        # Generate a new Fernet key
+        key = Fernet.generate_key()
+        
+        try:
+            with open(key_file, 'w') as f:
+                json.dump({"key": key.decode()}, f)
+        except:
+            pass
+        
         return key
     
     def encrypt(self, text):
-        """Encrypt clipboard content"""
         if not text:
             return ""
         try:
@@ -52,7 +101,6 @@ class CrossSyncDesktop:
             return text
     
     def decrypt(self, encrypted_text):
-        """Decrypt clipboard content"""
         if not encrypted_text:
             return ""
         try:
@@ -60,25 +108,34 @@ class CrossSyncDesktop:
             decrypted = self.cipher.decrypt(encrypted)
             return decrypted.decode()
         except Exception as e:
-            print(f"⚠️ Decryption error: {e}")
             return encrypted_text
     
     def hash_content(self, text):
-        """Generate hash for content"""
         return hashlib.sha256(text.encode()).hexdigest()
     
     def login(self):
-        """Login to the backend"""
+        print("\n🔐 Login Required")
+        print("=" * 40)
+        
+        email = input("Email: ").strip()
+        password = input("Password: ").strip()
+        
+        if not email or not password:
+            print("❌ Email and password are required")
+            return False
+        
         try:
             response = httpx.post(
                 f"{BASE_URL}/auth/login",
-                json={"email": EMAIL, "password": PASSWORD},
-                timeout=5.0
+                json={"email": email, "password": password},
+                timeout=10.0
             )
             if response.status_code == 200:
                 data = response.json()
                 self.access_token = data["access_token"]
-                print(f"✅ Logged in! Device ID: {self.device_id[:8]}...")
+                self.user_email = email
+                print(f"✅ Logged in as: {email}")
+                print(f"📱 Device ID: {self.device_id[:8]}...")
                 return True
             else:
                 print(f"❌ Login failed: {response.text}")
@@ -88,42 +145,50 @@ class CrossSyncDesktop:
             return False
     
     def register_device(self):
-        """Register this device"""
         try:
+            response = httpx.get(
+                f"{BASE_URL}/auth/user",
+                params={"access_token": self.access_token}
+            )
+            if response.status_code != 200:
+                print("⚠️ Could not verify user")
+                return
+            
+            user_data = response.json()
+            user_id = user_data.get("id")
+            
+            if not user_id:
+                print("⚠️ Could not get user ID")
+                return
+            
             response = httpx.post(
                 f"{BASE_URL}/devices/register",
                 params={
-                    "user_id": "ac011d70-d811-42b7-b145-1ab3820d92d6",
+                    "user_id": user_id,
                     "access_token": self.access_token
                 },
                 json={
                     "device_name": f"Desktop-{self.device_id[:8]}",
                     "device_type": "desktop"
                 },
-                timeout=5.0
+                timeout=10.0
             )
+            
             if response.status_code == 200:
                 print(f"✅ Device registered!")
-                return True
             else:
                 print(f"⚠️ Device registration: {response.text}")
-                return False
         except Exception as e:
             print(f"⚠️ Error registering device: {e}")
-            return False
     
     def sync_clipboard(self, content):
-        """Sync clipboard content to server"""
         try:
-            # Encrypt content
             encrypted = self.encrypt(content)
             content_hash = self.hash_content(content)
             
-            # Check if already synced
             if content_hash in self.synced_hashes:
                 return
             
-            # Sync to server
             sync_data = {
                 "content": encrypted,
                 "device_id": self.device_id,
@@ -134,11 +199,12 @@ class CrossSyncDesktop:
                 f"{BASE_URL}/clipboard/sync",
                 params={"access_token": self.access_token},
                 json=sync_data,
-                timeout=5.0
+                timeout=10.0
             )
             
             if response.status_code == 200:
                 self.synced_hashes.add(content_hash)
+                self.save_config()
                 print(f"📤 Synced: {content[:30]}...")
                 return True
             else:
@@ -149,16 +215,16 @@ class CrossSyncDesktop:
             return False
     
     def fetch_pending(self):
-        """Fetch pending clipboard items from other devices"""
         try:
             response = httpx.get(
                 f"{BASE_URL}/clipboard/sync/{self.device_id}",
                 params={"access_token": self.access_token},
-                timeout=5.0
+                timeout=10.0
             )
             
             if response.status_code == 200:
-                items = response.json().get("items", [])
+                data = response.json()
+                items = data.get("items", [])
                 received_count = 0
                 
                 for item in items:
@@ -166,14 +232,13 @@ class CrossSyncDesktop:
                     if content_hash in self.synced_hashes:
                         continue
                     
-                    # Decrypt content
                     encrypted_content = item.get("content")
                     decrypted = self.decrypt(encrypted_content)
                     
                     if decrypted:
-                        # Update local clipboard
                         pyperclip.copy(decrypted)
                         self.synced_hashes.add(content_hash)
+                        self.save_config()
                         received_count += 1
                         print(f"📥 Received: {decrypted[:30]}...")
                 
@@ -183,52 +248,53 @@ class CrossSyncDesktop:
             else:
                 return 0
         except Exception as e:
-            print(f"❌ Error fetching: {e}")
+            print(f"⚠️ Error fetching: {e}")
             return 0
     
     def monitor_clipboard(self):
-        """Monitor clipboard for changes"""
         print(f"\n🔍 Monitoring clipboard... (Press Ctrl+C to stop)")
-        print(f"📋 Current clipboard preview: {pyperclip.paste()[:50]}...")
+        print(f"💻 Device: {self.device_id[:8]}...")
+        print(f"🌐 Connected to: {BASE_URL}")
+        print("=" * 50)
+        
         self.last_content = pyperclip.paste()
         
         while self.is_running:
             try:
                 current_content = pyperclip.paste()
                 
-                # Check if clipboard changed
                 if current_content and current_content != self.last_content:
-                    print(f"\n📋 Clipboard changed: {current_content[:30]}...")
-                    
-                    # Sync the new content
+                    print(f"\n📋 Clipboard changed")
                     self.sync_clipboard(current_content)
                     self.last_content = current_content
                 
-                # Check for pending items from other devices
                 self.fetch_pending()
-                
-                time.sleep(2)  # Check every 2 seconds
+                time.sleep(2)
                 
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                print(f"❌ Error: {e}")
-                time.sleep(1)
+                print(f"⚠️ Error: {e}")
+                time.sleep(2)
     
     def run(self):
-        """Run the desktop app"""
-        print("="*50)
+        print("=" * 50)
         print("🔄 CrossSync Clipboard Desktop App")
-        print("="*50)
+        print("   Production Version 1.0.0")
+        print("=" * 50)
         
-        # Login and setup
         if not self.login():
-            print("❌ Could not login. Please check your credentials.")
+            print("❌ Could not login. Please restart and try again.")
+            input("Press Enter to exit...")
             return
         
         self.register_device()
         
-        # Start monitoring
+        print("\n" + "=" * 50)
+        print("🔄 CrossSync is running in the background")
+        print("📋 Copy any text to sync across devices")
+        print("=" * 50)
+        
         self.is_running = True
         try:
             self.monitor_clipboard()
@@ -236,6 +302,7 @@ class CrossSyncDesktop:
             print("\n\n👋 Shutting down...")
         finally:
             self.is_running = False
+            print("✅ CrossSync stopped")
 
 if __name__ == "__main__":
     app = CrossSyncDesktop()

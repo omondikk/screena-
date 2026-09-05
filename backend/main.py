@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from supabase import create_client, Client
 from pydantic import BaseModel, EmailStr
@@ -19,6 +20,10 @@ app = FastAPI(
     description="Cross-device clipboard synchronization"
 )
 
+# Add GZip compression for faster responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,7 +46,7 @@ except Exception as e:
     print(f"❌ Supabase initialization error: {e}")
     supabase = None
 
-# ========== ENCRYPTION KEY (For Phone Viewer) ==========
+# Encryption key (must match desktop app)
 ENCRYPTION_KEY = base64.urlsafe_b64encode(b"crosssync-clipboard-key-2024" + b"!" * 2)
 
 # ========== PYDANTIC MODELS ==========
@@ -125,7 +130,6 @@ async def login_user(user: UserLogin):
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
 
-# ========== USER INFO ROUTE ==========
 @app.get("/auth/user")
 async def get_user(access_token: str):
     """Get current user info"""
@@ -192,6 +196,7 @@ async def get_devices(user_id: str, access_token: str):
 # ========== CLIPBOARD ROUTES ==========
 @app.post("/clipboard/sync")
 async def sync_clipboard(item: ClipboardItem, access_token: str):
+    """Sync clipboard content - stores both encrypted and plain text for speed"""
     if not supabase:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
     
@@ -216,23 +221,37 @@ async def sync_clipboard(item: ClipboardItem, access_token: str):
                 "is_new": False
             }
         
+        # Decrypt the content for plain text storage (so phone viewer can show it instantly)
+        try:
+            encrypted_bytes = base64.urlsafe_b64decode(item.content)
+            cipher = Fernet(ENCRYPTION_KEY)
+            decrypted_text = cipher.decrypt(encrypted_bytes).decode()
+        except:
+            decrypted_text = item.content  # Fallback if decryption fails
+        
         data = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "device_id": item.device_id,
-            "content": item.content,
+            "content": item.content,  # Encrypted content (for desktop sync)
+            "content_plain": decrypted_text,  # Plain text (for phone viewer)
             "content_hash": item.content_hash,
             "created_at": datetime.utcnow().isoformat(),
             "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
         }
         
         result = supabase.table("clipboard_items").insert(data).execute()
-        return {"message": "Synced successfully", "id": result.data[0]["id"], "is_new": True}
+        return {
+            "message": "Synced successfully",
+            "id": result.data[0]["id"],
+            "is_new": True
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/clipboard/sync/{device_id}")
-async def get_pending_sync(device_id: str, access_token: str):
+async def get_pending_sync(device_id: str, access_token: str, limit: int = 50, offset: int = 0):
+    """Get pending clipboard items - optimized with limit and offset"""
     if not supabase:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
     
@@ -243,38 +262,39 @@ async def get_pending_sync(device_id: str, access_token: str):
         
         user_id = user.user.id
         
+        # Get items from other devices, limited for speed
         result = supabase.table("clipboard_items")\
             .select("*")\
             .eq("user_id", user_id)\
             .neq("device_id", device_id)\
             .gt("expires_at", datetime.utcnow().isoformat())\
             .order("created_at", desc=True)\
-            .limit(50)\
+            .range(offset, offset + limit - 1)\
             .execute()
         
-        return {"items": result.data}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# ========== DECRYPT ENDPOINT (For Phone Viewer) ==========
-@app.post("/decrypt")
-async def decrypt_content(data: dict):
-    """Decrypt encrypted clipboard content for phone viewer"""
-    try:
-        encrypted = data.get("encrypted", "")
-        if not encrypted:
-            return {"decrypted": ""}
+        # Count total for pagination
+        count_result = supabase.table("clipboard_items")\
+            .select("id", count="exact")\
+            .eq("user_id", user_id)\
+            .neq("device_id", device_id)\
+            .gt("expires_at", datetime.utcnow().isoformat())\
+            .execute()
         
-        cipher = Fernet(ENCRYPTION_KEY)
-        decrypted = cipher.decrypt(base64.urlsafe_b64decode(encrypted))
-        return {"decrypted": decrypted.decode()}
+        total_count = count_result.count if count_result else 0
+        
+        return {
+            "items": result.data,
+            "total": total_count,
+            "limit": limit,
+            "offset": offset
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 # ========== PHONE VIEWER ==========
 @app.get("/viewer")
 async def serve_viewer():
-    """Serve the phone viewer HTML page"""
+    """Serve the optimized phone viewer HTML page"""
     html_path = os.path.join(os.path.dirname(__file__), "phone_viewer.html")
     if os.path.exists(html_path):
         with open(html_path, "r") as f:

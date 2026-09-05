@@ -1,0 +1,1 @@
+CreateObject("WScript.Shell").Run "python simple_desktop.py", 0, False
