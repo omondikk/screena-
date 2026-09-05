@@ -1,0 +1,17 @@
+﻿services:
+  - type: web
+    name: crosssync-backend
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port 
+    envVars:
+      - key: SUPABASE_URL
+        value: https://zqhmerojxldeqxdjdvqb.supabase.co
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+    autoDeploy: true
