@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+supabase>=2.0.0,<3.0.0
+python-dotenv
+pydantic
+python-jose[cryptography]
+passlib[bcrypt]
+httpx
