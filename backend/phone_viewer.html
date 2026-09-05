@@ -60,6 +60,19 @@
             padding: 8px 16px;
             font-size: 14px;
         }
+        .btn-danger {
+            background: #dc3545;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .btn-danger:active { background: #c82333; }
+        .btn-success {
+            background: #28a745;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
         .item {
             background: #f8f9fa;
             padding: 14px;
@@ -98,6 +111,18 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .badge {
             background: #28a745;
@@ -114,6 +139,36 @@
             font-size: 12px;
             margin-top: 8px;
         }
+        .user-info {
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .logout-confirm {
+            text-align: center;
+            font-size: 14px;
+            color: #dc3545;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8d7da;
+            border-radius: 8px;
+            display: none;
+        }
+        .logout-confirm.show {
+            display: block;
+        }
+        .clear-btn {
+            background: #ffc107;
+            color: #333;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .clear-btn:active { background: #e0a800; }
     </style>
 </head>
 <body>
@@ -124,6 +179,7 @@
             <p class="sub">⚡ Plain text - No encryption</p>
         </div>
 
+        <!-- Login Card -->
         <div id="loginCard" class="card">
             <h3>🔐 Login</h3>
             <input type="email" id="email" placeholder="Email" value="test@crosssync.com">
@@ -132,16 +188,24 @@
             <div id="loginStatus" style="margin-top: 10px; text-align: center; font-size: 14px;"></div>
         </div>
 
+        <!-- Data Card -->
         <div id="dataCard" class="card hidden">
             <div class="toolbar">
-                <h3>📋 Clipboard Items</h3>
-                <div>
-                    <button class="btn-secondary" onclick="refresh()" style="margin-right: 8px;">🔄</button>
+                <div class="toolbar-left">
+                    <h3>📋 Items</h3>
                     <span id="itemCount" class="badge">0</span>
+                </div>
+                <div class="toolbar-right">
+                    <button class="btn-secondary" onclick="refresh()" title="Refresh">🔄</button>
+                    <button class="btn-danger" onclick="logout()" title="Logout">🚪</button>
                 </div>
             </div>
             <div id="status" class="status loading">Loading...</div>
             <div id="itemsList"></div>
+            <div id="userInfo" class="user-info"></div>
+            <div id="logoutConfirm" class="logout-confirm">
+                🔒 Logged out successfully
+            </div>
             <div class="refresh-note">Auto-refreshes every 5 seconds</div>
         </div>
     </div>
@@ -150,6 +214,33 @@
         const API_URL = 'https://crosssync-backend.onrender.com';
         let token = localStorage.getItem('token');
         let refreshTimer = null;
+
+        // Check if token is expired
+        function checkTokenExpiry() {
+            const token = localStorage.getItem('token');
+            if (!token) return false;
+            
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                const expTime = payload.exp * 1000;
+                if (Date.now() >= expTime) {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('device_id');
+                    console.log('Token expired, cleared');
+                    return true;
+                }
+            } catch (e) {
+                localStorage.removeItem('token');
+                console.log('Invalid token, cleared');
+                return true;
+            }
+            return false;
+        }
+
+        // Auto-clear expired token on load
+        if (checkTokenExpiry()) {
+            token = null;
+        }
 
         function generateUUID() {
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -168,6 +259,43 @@
             return deviceId;
         }
 
+        // ===== LOGOUT FUNCTION =====
+        function logout() {
+            // Clear all localStorage data
+            localStorage.removeItem('token');
+            localStorage.removeItem('device_id');
+            localStorage.removeItem('user_email');
+            
+            // Clear token variable
+            token = null;
+            
+            // Stop auto-refresh
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+            
+            // Show logout confirmation
+            const confirmEl = document.getElementById('logoutConfirm');
+            confirmEl.textContent = '🔒 Logged out successfully!';
+            confirmEl.className = 'logout-confirm show';
+            
+            // Show login card, hide data card
+            document.getElementById('loginCard').classList.remove('hidden');
+            document.getElementById('dataCard').classList.add('hidden');
+            
+            // Clear login status
+            document.getElementById('loginStatus').innerHTML = '✅ Logged out. Please login again.';
+            
+            // Hide confirmation after 3 seconds
+            setTimeout(() => {
+                confirmEl.className = 'logout-confirm';
+            }, 3000);
+            
+            console.log('🔒 Logged out successfully');
+        }
+
+        // ===== LOGIN FUNCTION =====
         async function login() {
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
@@ -186,9 +314,18 @@
                     const data = await response.json();
                     token = data.access_token;
                     localStorage.setItem('token', token);
+                    localStorage.setItem('user_email', email);
+                    
                     statusEl.innerHTML = '✅ Login successful!';
                     document.getElementById('loginCard').classList.add('hidden');
                     document.getElementById('dataCard').classList.remove('hidden');
+                    
+                    // Show user info
+                    document.getElementById('userInfo').textContent = `👤 Logged in as: ${email}`;
+                    
+                    // Hide logout confirmation if shown
+                    document.getElementById('logoutConfirm').className = 'logout-confirm';
+                    
                     await refresh();
                     
                     if (refreshTimer) clearInterval(refreshTimer);
@@ -204,6 +341,7 @@
             }
         }
 
+        // ===== REFRESH FUNCTION =====
         async function refresh() {
             if (!token) {
                 document.getElementById('loginCard').classList.remove('hidden');
@@ -224,12 +362,11 @@
                 const response = await fetch(`${API_URL}/clipboard/sync/${deviceId}?access_token=${token}&limit=50`);
                 
                 if (!response.ok) {
-                    if (response.status === 401) {
-                        token = null;
-                        localStorage.removeItem('token');
-                        document.getElementById('loginCard').classList.remove('hidden');
-                        document.getElementById('dataCard').classList.add('hidden');
-                        if (refreshTimer) clearInterval(refreshTimer);
+                    if (response.status === 401 || response.status === 403) {
+                        // Token expired or invalid - auto logout
+                        logout();
+                        statusEl.className = 'status offline';
+                        statusEl.textContent = '⚠️ Session expired. Please login again.';
                         return;
                     }
                     throw new Error(await response.text());
@@ -255,7 +392,6 @@
                 for (let item of items) {
                     let content = item.content || 'Empty';
                     
-                    // Truncate for display
                     if (content.length > 500) {
                         content = content.substring(0, 500) + '...';
                     }
@@ -285,15 +421,35 @@
             return div.innerHTML;
         }
 
-        // Auto-login if token exists
+        // ===== HANDLE URL PARAMETER FOR LOGOUT =====
+        // Check if ?logout=1 is in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('logout') === '1') {
+            logout();
+        }
+
+        // Auto-login if token exists and not expired
         if (token) {
             document.getElementById('loginCard').classList.add('hidden');
             document.getElementById('dataCard').classList.remove('hidden');
+            
+            const email = localStorage.getItem('user_email') || 'User';
+            document.getElementById('userInfo').textContent = `👤 Logged in as: ${email}`;
+            
             refresh();
             refreshTimer = setInterval(() => {
                 if (token) refresh();
             }, 5000);
         }
+
+        // Keyboard shortcut: press 'L' to logout
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'l' || e.key === 'L') {
+                if (token) {
+                    logout();
+                }
+            }
+        });
     </script>
 </body>
 </html>
