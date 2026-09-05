@@ -66,21 +66,12 @@ class DeviceRegister(BaseModel):
     device_type: str = "desktop"
 
 class ClipboardItem(BaseModel):
-    content: str = Field(..., max_length=10 * 1024 * 1024)  # 10MB max
-    device_id: str
-    content_hash: str
-
-class ClipboardResponse(BaseModel):
-    id: str
-    user_id: str
-    device_id: str
     content: str
+    device_id: str
     content_hash: str
-    created_at: str
-    expires_at: str
 
 # ========== AUTH ROUTES ==========
-@app.post("/auth/register", response_model=Dict)
+@app.post("/auth/register")
 async def register_user(user: UserRegister):
     """Register a new user with device"""
     if not supabase:
@@ -119,7 +110,7 @@ async def register_user(user: UserRegister):
         logger.error(f"Registration error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/auth/login", response_model=Dict)
+@app.post("/auth/login")
 async def login_user(user: UserLogin):
     """Login user and return access token"""
     if not supabase:
@@ -134,7 +125,6 @@ async def login_user(user: UserLogin):
         if not response.user:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
-        # Update device activity
         try:
             supabase.table("devices")\
                 .update({"last_active": datetime.utcnow().isoformat()})\
@@ -155,7 +145,7 @@ async def login_user(user: UserLogin):
         logger.error(f"Login error: {str(e)}")
         raise HTTPException(status_code=401, detail=str(e))
 
-@app.get("/auth/user", response_model=Dict)
+@app.get("/auth/user")
 async def get_user(access_token: str):
     """Get current user info from token"""
     if not supabase:
@@ -175,7 +165,7 @@ async def get_user(access_token: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 # ========== DEVICE ROUTES ==========
-@app.post("/devices/register", response_model=Dict)
+@app.post("/devices/register")
 async def register_device(device: DeviceRegister, user_id: str, access_token: str):
     """Register a new device for a user"""
     if not supabase:
@@ -205,7 +195,7 @@ async def register_device(device: DeviceRegister, user_id: str, access_token: st
         logger.error(f"Device registration error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/devices", response_model=Dict)
+@app.get("/devices")
 async def get_devices(user_id: str, access_token: str):
     """Get all active devices for a user"""
     if not supabase:
@@ -234,23 +224,19 @@ async def sync_clipboard(item: ClipboardItem, access_token: str):
         raise HTTPException(status_code=503, detail="Database connection unavailable")
     
     try:
-        # Log incoming request size
         content_size = len(item.content)
         logger.info(f"📥 Sync request: {content_size} bytes from device {item.device_id[:8]}...")
         
-        # Validate content size
-        if content_size > 10 * 1024 * 1024:  # 10MB
+        if content_size > 10 * 1024 * 1024:
             logger.warning(f"⚠️ Content too large: {content_size} bytes")
             raise HTTPException(status_code=413, detail="Content too large (max 10MB)")
         
-        # Verify user
         user = supabase.auth.get_user(access_token)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
         
         user_id = user.user.id
         
-        # Check for duplicate
         existing = supabase.table("clipboard_items")\
             .select("id")\
             .eq("content_hash", item.content_hash)\
@@ -265,18 +251,16 @@ async def sync_clipboard(item: ClipboardItem, access_token: str):
                 "is_new": False
             }
         
-        # Create entry
         data = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "device_id": item.device_id,
-            "content": item.content,  # Store plain text
+            "content": item.content,
             "content_hash": item.content_hash,
             "created_at": datetime.utcnow().isoformat(),
             "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
         }
         
-        # Insert into database
         result = supabase.table("clipboard_items").insert(data).execute()
         
         logger.info(f"✅ Saved: {content_size} bytes, ID: {result.data[0]['id']}")
@@ -293,31 +277,22 @@ async def sync_clipboard(item: ClipboardItem, access_token: str):
         logger.error(f"❌ Sync error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-# ========== FIXED: GET PENDING SYNC ==========
 @app.get("/clipboard/sync/{device_id}")
-async def get_pending_sync(
-    device_id: str, 
-    access_token: str, 
-    limit: int = 50, 
-    offset: int = 0
-):
+async def get_pending_sync(device_id: str, access_token: str, limit: int = 50, offset: int = 0):
     """Get pending clipboard items - optimized with pagination"""
     if not supabase:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
     
     try:
-        # Verify user
         user = supabase.auth.get_user(access_token)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
         
         user_id = user.user.id
         
-        # Ensure limit is reasonable
         if limit > 100:
             limit = 100
         
-        # Get items from other devices
         result = supabase.table("clipboard_items")\
             .select("*")\
             .eq("user_id", user_id)\
@@ -327,7 +302,6 @@ async def get_pending_sync(
             .range(offset, offset + limit - 1)\
             .execute()
         
-        # Count total
         count_result = supabase.table("clipboard_items")\
             .select("id", count="exact")\
             .eq("user_id", user_id)\
@@ -337,7 +311,6 @@ async def get_pending_sync(
         
         total_count = count_result.count if count_result else 0
         
-        # Log response size
         total_size = sum(len(item.get("content", "")) for item in result.data)
         logger.info(f"📤 Fetch: {len(result.data)} items, {total_size} bytes total")
         
@@ -360,14 +333,12 @@ async def clear_all_clipboard(access_token: str):
         raise HTTPException(status_code=503, detail="Database connection unavailable")
     
     try:
-        # Verify user
         user = supabase.auth.get_user(access_token)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid token")
         
         user_id = user.user.id
         
-        # Count items before deletion
         count_result = supabase.table("clipboard_items")\
             .select("id", count="exact")\
             .eq("user_id", user_id)\
@@ -375,7 +346,6 @@ async def clear_all_clipboard(access_token: str):
         
         total_before = count_result.count if count_result else 0
         
-        # Delete ALL items for this user
         result = supabase.table("clipboard_items")\
             .delete()\
             .eq("user_id", user_id)\
@@ -383,7 +353,6 @@ async def clear_all_clipboard(access_token: str):
         
         deleted_count = len(result.data)
         
-        # Also clear sync state for this user's devices
         supabase.table("sync_state")\
             .delete()\
             .eq("user_id", user_id)\
@@ -400,7 +369,7 @@ async def clear_all_clipboard(access_token: str):
         logger.error(f"Clear all error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-# ========== CLEANUP OLD ITEMS (Optional) ==========
+# ========== CLEANUP OLD ITEMS ==========
 @app.delete("/clipboard/cleanup")
 async def cleanup_old_items(access_token: str, days: int = 1):
     """Delete clipboard items older than specified days"""
@@ -414,7 +383,6 @@ async def cleanup_old_items(access_token: str, days: int = 1):
         
         user_id = user.user.id
         
-        # Delete items older than 'days'
         cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
         
         result = supabase.table("clipboard_items")\
@@ -431,7 +399,7 @@ async def cleanup_old_items(access_token: str, days: int = 1):
         raise HTTPException(status_code=400, detail=str(e))
 
 # ========== HEALTH & STATUS ==========
-@app.get("/health", response_model=Dict)
+@app.get("/health")
 async def health_check():
     """Health check endpoint"""
     db_status = "connected" if supabase else "disconnected"
@@ -464,7 +432,7 @@ async def root():
     }
 
 # ========== PHONE VIEWER ==========
-@app.get("/viewer", response_class=HTMLResponse)
+@app.get("/viewer")
 async def serve_viewer():
     """Serve the phone viewer HTML page"""
     html_path = os.path.join(os.path.dirname(__file__), "phone_viewer.html")
