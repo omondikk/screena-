@@ -226,7 +226,7 @@ async def get_devices(user_id: str, access_token: str):
         logger.error(f"Get devices error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
-# ========== CLIPBOARD ROUTES (Large Content Optimized) ==========
+# ========== CLIPBOARD ROUTES ==========
 @app.post("/clipboard/sync")
 async def sync_clipboard(item: ClipboardItem, access_token: str, request: Request):
     """Sync clipboard content - optimized for large content up to 10MB"""
@@ -352,6 +352,84 @@ async def get_pending_sync(
         logger.error(f"Get pending error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
+# ========== CLEAR ALL DATA ENDPOINT ==========
+@app.delete("/clipboard/clear_all")
+async def clear_all_clipboard(access_token: str):
+    """Delete ALL clipboard items for the user"""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database connection unavailable")
+    
+    try:
+        # Verify user
+        user = supabase.auth.get_user(access_token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        user_id = user.user.id
+        
+        # Count items before deletion
+        count_result = supabase.table("clipboard_items")\
+            .select("id", count="exact")\
+            .eq("user_id", user_id)\
+            .execute()
+        
+        total_before = count_result.count if count_result else 0
+        
+        # Delete ALL items for this user
+        result = supabase.table("clipboard_items")\
+            .delete()\
+            .eq("user_id", user_id)\
+            .execute()
+        
+        deleted_count = len(result.data)
+        
+        # Also clear sync state for this user's devices
+        supabase.table("sync_state")\
+            .delete()\
+            .eq("user_id", user_id)\
+            .execute()
+        
+        logger.info(f"🗑️ Cleared {deleted_count} items for user {user_id}")
+        
+        return {
+            "message": f"Deleted {deleted_count} items",
+            "deleted": deleted_count,
+            "total_before": total_before
+        }
+    except Exception as e:
+        logger.error(f"Clear all error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ========== CLEANUP OLD ITEMS (Optional) ==========
+@app.delete("/clipboard/cleanup")
+async def cleanup_old_items(access_token: str, days: int = 1):
+    """Delete clipboard items older than specified days"""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database connection unavailable")
+    
+    try:
+        user = supabase.auth.get_user(access_token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        user_id = user.user.id
+        
+        # Delete items older than 'days'
+        cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        
+        result = supabase.table("clipboard_items")\
+            .delete()\
+            .eq("user_id", user_id)\
+            .lt("created_at", cutoff_date)\
+            .execute()
+        
+        return {
+            "deleted": len(result.data),
+            "message": f"Deleted {len(result.data)} items older than {days} day(s)"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 # ========== HEALTH & STATUS ==========
 @app.get("/health", response_model=Dict)
 async def health_check():
@@ -412,23 +490,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal server error"}
     )
-
-# ========== CLEANUP TASK (Optional) ==========
-# This would run as a background task
-async def cleanup_expired_items():
-    """Clean up expired clipboard items"""
-    if not supabase:
-        return
-    
-    try:
-        result = supabase.table("clipboard_items")\
-            .delete()\
-            .lt("expires_at", datetime.utcnow().isoformat())\
-            .execute()
-        if result.data:
-            logger.info(f"🧹 Cleaned up {len(result.data)} expired items")
-    except Exception as e:
-        logger.error(f"Cleanup error: {str(e)}")
 
 # ========== STARTUP EVENT ==========
 @app.on_event("startup")

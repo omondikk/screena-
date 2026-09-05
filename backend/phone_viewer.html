@@ -67,6 +67,14 @@
             font-size: 14px;
         }
         .btn-danger:active { background: #c82333; }
+        .btn-warning {
+            background: #ffc107;
+            color: #333;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .btn-warning:active { background: #e0a800; }
         .btn-success {
             background: #28a745;
             width: auto;
@@ -161,14 +169,84 @@
         .logout-confirm.show {
             display: block;
         }
-        .clear-btn {
-            background: #ffc107;
-            color: #333;
-            width: auto;
-            padding: 8px 16px;
+        .clear-confirm {
+            text-align: center;
             font-size: 14px;
+            color: #dc3545;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8d7da;
+            border-radius: 8px;
+            display: none;
         }
-        .clear-btn:active { background: #e0a800; }
+        .clear-confirm.show {
+            display: block;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .action-buttons button {
+            flex: 1;
+            min-width: 80px;
+        }
+        .storage-info {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            padding: 8px;
+            background: #e8f4fd;
+            border-radius: 8px;
+            margin-top: 8px;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-overlay.show {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            max-width: 400px;
+            width: 90%;
+            margin: 20px;
+        }
+        .modal h3 { 
+            margin-bottom: 12px;
+            color: #dc3545;
+        }
+        .modal p {
+            color: #666;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        .modal .modal-buttons {
+            display: flex;
+            gap: 12px;
+        }
+        .modal .modal-buttons button {
+            flex: 1;
+        }
+        .modal .modal-buttons .btn-cancel {
+            background: #6c757d;
+        }
+        .modal .modal-buttons .btn-confirm {
+            background: #dc3545;
+        }
     </style>
 </head>
 <body>
@@ -179,7 +257,6 @@
             <p class="sub">⚡ Plain text - No encryption</p>
         </div>
 
-        <!-- Login Card -->
         <div id="loginCard" class="card">
             <h3>🔐 Login</h3>
             <input type="email" id="email" placeholder="Email" value="test@crosssync.com">
@@ -188,7 +265,6 @@
             <div id="loginStatus" style="margin-top: 10px; text-align: center; font-size: 14px;"></div>
         </div>
 
-        <!-- Data Card -->
         <div id="dataCard" class="card hidden">
             <div class="toolbar">
                 <div class="toolbar-left">
@@ -203,10 +279,30 @@
             <div id="status" class="status loading">Loading...</div>
             <div id="itemsList"></div>
             <div id="userInfo" class="user-info"></div>
+            <div id="storageInfo" class="storage-info"></div>
             <div id="logoutConfirm" class="logout-confirm">
                 🔒 Logged out successfully
             </div>
+            <div id="clearConfirm" class="clear-confirm">
+                🗑️ All data cleared successfully!
+            </div>
+            <div class="action-buttons">
+                <button class="btn-warning" onclick="showClearModal()" title="Clear all synced data">🗑️ Clear Data</button>
+            </div>
             <div class="refresh-note">Auto-refreshes every 5 seconds</div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="clearModal" class="modal-overlay">
+        <div class="modal">
+            <h3>⚠️ Clear All Data</h3>
+            <p>Are you sure you want to delete ALL synced clipboard items from the database? This action cannot be undone!</p>
+            <p style="font-size: 14px; color: #dc3545;">This will delete all items from all devices.</p>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeClearModal()">Cancel</button>
+                <button class="btn-confirm" onclick="confirmClear()">Yes, Delete All</button>
+            </div>
         </div>
     </div>
 
@@ -215,7 +311,7 @@
         let token = localStorage.getItem('token');
         let refreshTimer = null;
 
-        // Check if token is expired
+        // ===== TOKEN CHECK =====
         function checkTokenExpiry() {
             const token = localStorage.getItem('token');
             if (!token) return false;
@@ -226,22 +322,20 @@
                 if (Date.now() >= expTime) {
                     localStorage.removeItem('token');
                     localStorage.removeItem('device_id');
-                    console.log('Token expired, cleared');
                     return true;
                 }
             } catch (e) {
                 localStorage.removeItem('token');
-                console.log('Invalid token, cleared');
                 return true;
             }
             return false;
         }
 
-        // Auto-clear expired token on load
         if (checkTokenExpiry()) {
             token = null;
         }
 
+        // ===== UUID GENERATOR =====
         function generateUUID() {
             return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
                 var r = Math.random() * 16 | 0,
@@ -259,43 +353,7 @@
             return deviceId;
         }
 
-        // ===== LOGOUT FUNCTION =====
-        function logout() {
-            // Clear all localStorage data
-            localStorage.removeItem('token');
-            localStorage.removeItem('device_id');
-            localStorage.removeItem('user_email');
-            
-            // Clear token variable
-            token = null;
-            
-            // Stop auto-refresh
-            if (refreshTimer) {
-                clearInterval(refreshTimer);
-                refreshTimer = null;
-            }
-            
-            // Show logout confirmation
-            const confirmEl = document.getElementById('logoutConfirm');
-            confirmEl.textContent = '🔒 Logged out successfully!';
-            confirmEl.className = 'logout-confirm show';
-            
-            // Show login card, hide data card
-            document.getElementById('loginCard').classList.remove('hidden');
-            document.getElementById('dataCard').classList.add('hidden');
-            
-            // Clear login status
-            document.getElementById('loginStatus').innerHTML = '✅ Logged out. Please login again.';
-            
-            // Hide confirmation after 3 seconds
-            setTimeout(() => {
-                confirmEl.className = 'logout-confirm';
-            }, 3000);
-            
-            console.log('🔒 Logged out successfully');
-        }
-
-        // ===== LOGIN FUNCTION =====
+        // ===== LOGIN =====
         async function login() {
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
@@ -320,11 +378,9 @@
                     document.getElementById('loginCard').classList.add('hidden');
                     document.getElementById('dataCard').classList.remove('hidden');
                     
-                    // Show user info
                     document.getElementById('userInfo').textContent = `👤 Logged in as: ${email}`;
-                    
-                    // Hide logout confirmation if shown
                     document.getElementById('logoutConfirm').className = 'logout-confirm';
+                    document.getElementById('clearConfirm').className = 'clear-confirm';
                     
                     await refresh();
                     
@@ -341,7 +397,104 @@
             }
         }
 
-        // ===== REFRESH FUNCTION =====
+        // ===== LOGOUT =====
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('device_id');
+            localStorage.removeItem('user_email');
+            
+            token = null;
+            
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+            
+            const confirmEl = document.getElementById('logoutConfirm');
+            confirmEl.textContent = '🔒 Logged out successfully!';
+            confirmEl.className = 'logout-confirm show';
+            
+            document.getElementById('loginCard').classList.remove('hidden');
+            document.getElementById('dataCard').classList.add('hidden');
+            document.getElementById('loginStatus').innerHTML = '✅ Logged out. Please login again.';
+            
+            setTimeout(() => {
+                confirmEl.className = 'logout-confirm';
+            }, 3000);
+        }
+
+        // ===== CLEAR ALL DATA =====
+        function showClearModal() {
+            document.getElementById('clearModal').classList.add('show');
+        }
+
+        function closeClearModal() {
+            document.getElementById('clearModal').classList.remove('show');
+        }
+
+        async function confirmClear() {
+            closeClearModal();
+            
+            if (!token) {
+                alert('Please login first');
+                return;
+            }
+
+            const confirmMessage = 'Are you sure you want to delete ALL clipboard items from the database?';
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+
+            const statusEl = document.getElementById('status');
+            statusEl.className = 'status loading';
+            statusEl.textContent = '🗑️ Deleting all data...';
+
+            try {
+                const deviceId = getDeviceId();
+                const response = await fetch(`${API_URL}/clipboard/clear_all?access_token=${token}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const confirmEl = document.getElementById('clearConfirm');
+                    confirmEl.textContent = `🗑️ ${data.message || 'All data cleared successfully!'}`;
+                    confirmEl.className = 'clear-confirm show';
+                    
+                    statusEl.className = 'status online';
+                    statusEl.textContent = '✅ All data cleared!';
+                    
+                    // Refresh the list
+                    await refresh();
+                    
+                    // Update storage info
+                    updateStorageInfo(0);
+                    
+                    setTimeout(() => {
+                        confirmEl.className = 'clear-confirm';
+                    }, 5000);
+                } else {
+                    const error = await response.json();
+                    statusEl.className = 'status offline';
+                    statusEl.textContent = `❌ Failed: ${error.detail || 'Unknown error'}`;
+                }
+            } catch (error) {
+                statusEl.className = 'status offline';
+                statusEl.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+
+        // ===== UPDATE STORAGE INFO =====
+        function updateStorageInfo(count) {
+            const storageEl = document.getElementById('storageInfo');
+            if (count === 0) {
+                storageEl.textContent = '📊 No items stored';
+            } else {
+                storageEl.textContent = `📊 ${count} items stored in database`;
+            }
+        }
+
+        // ===== REFRESH =====
         async function refresh() {
             if (!token) {
                 document.getElementById('loginCard').classList.remove('hidden');
@@ -363,10 +516,7 @@
                 
                 if (!response.ok) {
                     if (response.status === 401 || response.status === 403) {
-                        // Token expired or invalid - auto logout
                         logout();
-                        statusEl.className = 'status offline';
-                        statusEl.textContent = '⚠️ Session expired. Please login again.';
                         return;
                     }
                     throw new Error(await response.text());
@@ -377,6 +527,7 @@
                 const total = data.total || 0;
                 
                 itemCount.textContent = items.length;
+                updateStorageInfo(total);
                 
                 if (items.length === 0) {
                     statusEl.className = 'status online';
@@ -421,14 +572,7 @@
             return div.innerHTML;
         }
 
-        // ===== HANDLE URL PARAMETER FOR LOGOUT =====
-        // Check if ?logout=1 is in the URL
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('logout') === '1') {
-            logout();
-        }
-
-        // Auto-login if token exists and not expired
+        // ===== AUTO-LOGIN =====
         if (token) {
             document.getElementById('loginCard').classList.add('hidden');
             document.getElementById('dataCard').classList.remove('hidden');
@@ -442,12 +586,19 @@
             }, 5000);
         }
 
-        // Keyboard shortcut: press 'L' to logout
+        // ===== URL PARAMETER HANDLING =====
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('logout') === '1') {
+            logout();
+        }
+
+        // ===== KEYBOARD SHORTCUTS =====
         document.addEventListener('keydown', function(e) {
             if (e.key === 'l' || e.key === 'L') {
-                if (token) {
-                    logout();
-                }
+                if (token) logout();
+            }
+            if (e.key === 'c' || e.key === 'C') {
+                if (token) showClearModal();
             }
         });
     </script>
