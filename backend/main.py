@@ -228,7 +228,7 @@ async def get_devices(user_id: str, access_token: str):
 
 # ========== CLIPBOARD ROUTES ==========
 @app.post("/clipboard/sync")
-async def sync_clipboard(item: ClipboardItem, access_token: str, request: Request):
+async def sync_clipboard(item: ClipboardItem, access_token: str):
     """Sync clipboard content - optimized for large content up to 10MB"""
     if not supabase:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
@@ -293,13 +293,13 @@ async def sync_clipboard(item: ClipboardItem, access_token: str, request: Reques
         logger.error(f"❌ Sync error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
+# ========== FIXED: GET PENDING SYNC ==========
 @app.get("/clipboard/sync/{device_id}")
 async def get_pending_sync(
     device_id: str, 
     access_token: str, 
     limit: int = 50, 
-    offset: int = 0,
-    request: Request
+    offset: int = 0
 ):
     """Get pending clipboard items - optimized with pagination"""
     if not supabase:
